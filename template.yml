@@ -1,25 +1,16 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Transform: AWS::Serverless-2016-10-31
 Description: AWS Lambda Power Tuning resources.
-
-Metadata:
-  AWS::ServerlessRepo::Application:
-    Name: aws-lambda-power-tuning
-    Description: AWS Lambda Power Tuning is an open-source tool that can help you visualize and fine-tune the memory/power configuration of Lambda functions. It runs in your AWS account - powered by AWS Step Functions - and it supports multiple optimization strategies.
-    Author: Alex Casalboni
-    SpdxLicenseId: Apache-2.0
-    LicenseUrl: LICENSE.txt
-    ReadmeUrl: README-SAR.md
-    Labels: ['lambda', 'power', 'state-machine', 'step-functions', 'optimization']
-    HomePageUrl: https://github.com/alexcasalboni/aws-lambda-power-tuning
-    SemanticVersion: 4.3.3
-    SourceCodeUrl: https://github.com/alexcasalboni/aws-lambda-power-tuning
-
-Parameters: 
-  PowerValues: 
+Parameters:
+  PowerValues:
     Type: List<Number>
     Default: 128,256,512,1024,1536,3008
-    Description: Default RAM values, used only if not provided as execution input (comma-separated).
+    Description: Default RAM values, used only if not provided as execution input
+      (comma-separated).
+   LambdaFunctions:
+    Type: CommaDelimitedList
+    Default: 'Function1,Function2'
+    Description: Comma-separated list of Lambda functions to be tested.	  
   visualizationURL:
     Type: String
     Default: https://lambda-power-tuning.show/
@@ -33,19 +24,23 @@ Parameters:
     Default: 300
     MinValue: 10
     MaxValue: 900
-    Description: Maximum invocation timeout (in seconds) for the Executor step, after which you get a States.Timeout error
+    Description: Maximum invocation timeout (in seconds) for the Executor step, after
+      which you get a States.Timeout error
   permissionsBoundary:
     Type: String
     Default: ''
-    Description: The ARN of a permissions boundary to use for all functions' execution role.
+    Description: The ARN of a permissions boundary to use for all functions' execution
+      role.
   payloadS3Bucket:
     Type: String
     Default: ''
-    Description: S3 bucket name used for large payloads (optional), included in IAM policy if not an empty string
+    Description: S3 bucket name used for large payloads (optional), included in IAM
+      policy if not an empty string
   payloadS3Key:
     Type: String
     Default: '*'
-    Description: S3 object key used for large payloads (optional), included in IAM policy if bucket is not an empty string (all objects are readable by default)
+    Description: S3 object key used for large payloads (optional), included in IAM
+      policy if bucket is not an empty string (all objects are readable by default)
   layerSdkName:
     Type: String
     Default: ''
@@ -57,109 +52,177 @@ Parameters:
   securityGroupIds:
     Type: CommaDelimitedList
     Default: ''
-    Description: List of Security Groups to use in every Lambda function's VPC Configuration (optional).
+    Description: List of Security Groups to use in every Lambda function's VPC Configuration
+      (optional).
   subnetIds:
     Type: CommaDelimitedList
     Default: ''
-    Description: List of Subnets to use in every Lambda function's VPC Configuration (optional).
-
+    Description: List of Subnets to use in every Lambda function's VPC Configuration
+      (optional).
 Conditions:
-  UsePermissionsBoundary: !Not [!Equals [!Ref permissionsBoundary, '']]
-  S3BucketProvided: !Not [!Equals [!Ref payloadS3Bucket, '']]
-  UseLayerSdkName: !Not [!Equals [!Ref layerSdkName, '']]
-  UseSecurityGroupIds: !Not [!Equals [!Join ['', !Ref securityGroupIds], '']]
-  UseSubnetIds: !Not [!Equals [!Join ['', !Ref subnetIds], '']]
-  UseVPCConfig: !Or [Condition: UseSecurityGroupIds, Condition: UseSubnetIds]
-
+  UsePermissionsBoundary:
+    Fn::Not:
+    - Fn::Equals:
+      - Ref: permissionsBoundary
+      - ''
+  S3BucketProvided:
+    Fn::Not:
+    - Fn::Equals:
+      - Ref: payloadS3Bucket
+      - ''
+  UseLayerSdkName:
+    Fn::Not:
+    - Fn::Equals:
+      - Ref: layerSdkName
+      - ''
+  UseSecurityGroupIds:
+    Fn::Not:
+    - Fn::Equals:
+      - Fn::Join:
+        - ''
+        - Ref: securityGroupIds
+      - ''
+  UseSubnetIds:
+    Fn::Not:
+    - Fn::Equals:
+      - Fn::Join:
+        - ''
+        - Ref: subnetIds
+      - ''
+  UseVPCConfig:
+    Fn::Or:
+    - Condition: UseSecurityGroupIds
+    - Condition: UseSubnetIds
 Globals:
   Function:
     Runtime: nodejs16.x
     MemorySize: 128
-    Timeout: !Ref totalExecutionTimeout
-    PermissionsBoundary: !If [UsePermissionsBoundary, !Ref permissionsBoundary, !Ref AWS::NoValue]
-    VpcConfig: !If [UseVPCConfig, {
-      SecurityGroupIds: !If [UseSecurityGroupIds, !Ref securityGroupIds, !Ref AWS::NoValue],
-      SubnetIds: !If [UseSubnetIds, !Ref subnetIds, !Ref AWS::NoValue]
-    }, !Ref AWS::NoValue]
+    Timeout:
+      Ref: totalExecutionTimeout
+    PermissionsBoundary:
+      Fn::If:
+      - UsePermissionsBoundary
+      - Ref: permissionsBoundary
+      - Ref: AWS::NoValue
+    VpcConfig:
+      Fn::If:
+      - UseVPCConfig
+      - SecurityGroupIds:
+          Fn::If:
+          - UseSecurityGroupIds
+          - Ref: securityGroupIds
+          - Ref: AWS::NoValue
+        SubnetIds:
+          Fn::If:
+          - UseSubnetIds
+          - Ref: subnetIds
+          - Ref: AWS::NoValue
+      - Ref: AWS::NoValue
     Environment:
       Variables:
-        defaultPowerValues: !Join [ ",", !Ref PowerValues ]
+        defaultPowerValues:
+          Fn::Join:
+          - ','
+          - Ref: PowerValues
         minRAM: '128'
-        baseCosts: '{"x86_64": {"ap-east-1":2.9e-9,"af-south-1":2.8e-9,"me-south-1":2.6e-9,"eu-south-1":2.4e-9,"ap-northeast-3":2.7e-9,"cn-north-1":0.0000000142,"cn-northwest-1":0.0000000142,"default":2.1e-9}, "arm64": {"default":1.7e-9}}'
-        sfCosts: '{"default": 0.000025,"us-gov-west-1": 0.00003,"ap-northeast-2": 0.0000271,"eu-south-1": 0.00002625,"af-south-1": 0.00002975,"us-west-1": 0.0000279,"eu-west-3": 0.0000297,"ap-east-1": 0.0000275,"me-south-1": 0.0000275,"ap-south-1": 0.0000285,"us-gov-east-1": 0.00003,"sa-east-1": 0.0000375,"cn-north-1":0.0001891,"cn-northwest-1":0.0001891}'
-        visualizationURL: !Ref visualizationURL
-
+        baseCosts: '{"x86_64": {"ap-east-1":2.9e-9,"af-south-1":2.8e-9,"me-south-1":2.6e-9,"eu-south-1":2.4e-9,"ap-northeast-3":2.7e-9,"cn-north-1":0.0000000142,"cn-northwest-1":0.0000000142,"default":2.1e-9},
+          "arm64": {"default":1.7e-9}}'
+        sfCosts: '{"default": 0.000025,"us-gov-west-1": 0.00003,"ap-northeast-2":
+          0.0000271,"eu-south-1": 0.00002625,"af-south-1": 0.00002975,"us-west-1":
+          0.0000279,"eu-west-3": 0.0000297,"ap-east-1": 0.0000275,"me-south-1": 0.0000275,"ap-south-1":
+          0.0000285,"us-gov-east-1": 0.00003,"sa-east-1": 0.0000375,"cn-north-1":0.0001891,"cn-northwest-1":0.0001891}'
+        visualizationURL:
+          Ref: visualizationURL
 Resources:
-
   SDKlayer:
     Type: AWS::Serverless::LayerVersion
     Properties:
-      LayerName: !If [UseLayerSdkName, !Ref layerSdkName, AWS-SDK-v2_1134_0]
+      LayerName:
+        Fn::If:
+        - UseLayerSdkName
+        - Ref: layerSdkName
+        - AWS-SDK-v2_1134_0
       Description: AWS SDK 2.1134.0
-      ContentUri: ./layer-sdk
+      ContentUri:
+        Bucket: awsserverlessrepo-changesets-1f9ifp952i9h0
+        Key: 824967406436/arn:aws:serverlessrepo:us-east-1:451282441545:applications-aws-lambda-power-tuning-versions-4.3.3/89880688-693c-4adf-99c6-7ec1c26b0392
       CompatibleRuntimes:
-        - nodejs16.x
-      LicenseInfo: 'Available under the MIT-0 license.'
+      - nodejs16.x
+      LicenseInfo: Available under the MIT-0 license.
       RetentionPolicy: Retain
     Metadata:
       BuildMethod: nodejs16.x
-
+      SamResourceId: SDKlayer
   initializerLogGroup:
     Type: AWS::Logs::LogGroup
     DependsOn: initializer
     Properties:
-      LogGroupName: !Sub '/aws/lambda/${initializer}'
-      RetentionInDays: !Ref logGroupRetentionInDays
-
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${initializer}
+      RetentionInDays:
+        Ref: logGroupRetentionInDays
+    Metadata:
+      SamResourceId: initializerLogGroup
   initializer:
     Type: AWS::Serverless::Function
     Properties:
-      CodeUri: lambda
+      CodeUri:
+        Bucket: awsserverlessrepo-changesets-1f9ifp952i9h0
+        Key: 824967406436/arn:aws:serverlessrepo:us-east-1:451282441545:applications-aws-lambda-power-tuning-versions-4.3.3/adc109c3-ab40-4633-b76b-13e533cc835d
       Handler: initializer.handler
       Layers:
-        - !Ref SDKlayer
+      - Ref: SDKlayer
       Policies:
-        - AWSLambdaBasicExecutionRole # Only logs
-        - Version: '2012-10-17' # allow Lambda actions
-          Statement:
-            - Effect: Allow
-              Action:
-                - lambda:GetAlias
-                - lambda:GetFunctionConfiguration
-                - lambda:PublishVersion
-                - lambda:UpdateFunctionConfiguration
-                - lambda:CreateAlias
-                - lambda:UpdateAlias
-              Resource: !Ref lambdaResource
-
+      - AWSLambdaBasicExecutionRole
+      - Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Action:
+          - lambda:GetAlias
+          - lambda:GetFunctionConfiguration
+          - lambda:PublishVersion
+          - lambda:UpdateFunctionConfiguration
+          - lambda:CreateAlias
+          - lambda:UpdateAlias
+          Resource:
+            Ref: lambdaResource
+    Metadata:
+      SamResourceId: initializer
   executorLogGroup:
     Type: AWS::Logs::LogGroup
     DependsOn: executor
     Properties:
-      LogGroupName: !Sub '/aws/lambda/${executor}'
-      RetentionInDays: !Ref logGroupRetentionInDays
-
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${executor}
+      RetentionInDays:
+        Ref: logGroupRetentionInDays
+    Metadata:
+      SamResourceId: executorLogGroup
   executor:
     Type: AWS::Serverless::Function
     Properties:
-      CodeUri: lambda
+      CodeUri:
+        Bucket: awsserverlessrepo-changesets-1f9ifp952i9h0
+        Key: 824967406436/arn:aws:serverlessrepo:us-east-1:451282441545:applications-aws-lambda-power-tuning-versions-4.3.3/adc109c3-ab40-4633-b76b-13e533cc835d
       Handler: executor.handler
       Layers:
-        - !Ref SDKlayer
+      - Ref: SDKlayer
       Policies:
-        - AWSLambdaBasicExecutionRole # only logs
-        - Version: '2012-10-17' # allow Lambda actions
-          Statement:
-            - Effect: Allow
-              Action:
-                - lambda:InvokeFunction
-                - lambda:GetFunctionConfiguration
-              Resource: !Ref lambdaResource
-        - !If
-          - S3BucketProvided # if S3 bucket is provided
-          - !Ref payloadS3Policy # allow read-only access to S3
-          - !Ref AWS::NoValue
-
+      - AWSLambdaBasicExecutionRole
+      - Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Action:
+          - lambda:InvokeFunction
+          - lambda:GetFunctionConfiguration
+          Resource:
+            Ref: lambdaResource
+      - Fn::If:
+        - S3BucketProvided
+        - Ref: payloadS3Policy
+        - Ref: AWS::NoValue
+    Metadata:
+      SamResourceId: executor
   payloadS3Policy:
     Condition: S3BucketProvided
     Type: AWS::IAM::ManagedPolicy
@@ -168,191 +231,173 @@ Resources:
       PolicyDocument:
         Version: '2012-10-17'
         Statement:
-          - Effect: Allow
-            Action:
-              - s3:ListBucket # this is needed only to detect 404 errors correctly
-              - s3:GetObject
-            Resource:
-              - !Sub arn:${AWS::Partition}:s3:::${payloadS3Bucket}
-              - !Sub arn:${AWS::Partition}:s3:::${payloadS3Bucket}/${payloadS3Key} # payloadS3Key is * by default
-
+        - Effect: Allow
+          Action:
+          - s3:ListBucket
+          - s3:GetObject
+          Resource:
+          - Fn::Sub: arn:${AWS::Partition}:s3:::${payloadS3Bucket}
+          - Fn::Sub: arn:${AWS::Partition}:s3:::${payloadS3Bucket}/${payloadS3Key}
+    Metadata:
+      SamResourceId: payloadS3Policy
   cleanerLogGroup:
     Type: AWS::Logs::LogGroup
     DependsOn: cleaner
     Properties:
-      LogGroupName: !Sub '/aws/lambda/${cleaner}'
-      RetentionInDays: !Ref logGroupRetentionInDays
-
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${cleaner}
+      RetentionInDays:
+        Ref: logGroupRetentionInDays
+    Metadata:
+      SamResourceId: cleanerLogGroup
   cleaner:
     Type: AWS::Serverless::Function
     Properties:
-      CodeUri: lambda
+      CodeUri:
+        Bucket: awsserverlessrepo-changesets-1f9ifp952i9h0
+        Key: 824967406436/arn:aws:serverlessrepo:us-east-1:451282441545:applications-aws-lambda-power-tuning-versions-4.3.3/adc109c3-ab40-4633-b76b-13e533cc835d
       Handler: cleaner.handler
       Layers:
-        - !Ref SDKlayer
+      - Ref: SDKlayer
       Policies:
-        - AWSLambdaBasicExecutionRole # only logs
-        - Version: '2012-10-17' # allow Lambda actions
-          Statement:
-            - Effect: Allow
-              Action:
-                - lambda:GetAlias
-                - lambda:DeleteAlias
-                - lambda:DeleteFunction  # only by version/qualifier
-              Resource: !Ref lambdaResource
-
+      - AWSLambdaBasicExecutionRole
+      - Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Action:
+          - lambda:GetAlias
+          - lambda:DeleteAlias
+          - lambda:DeleteFunction
+          Resource:
+            Ref: lambdaResource
+    Metadata:
+      SamResourceId: cleaner
   analyzerLogGroup:
     Type: AWS::Logs::LogGroup
     DependsOn: analyzer
     Properties:
-      LogGroupName: !Sub '/aws/lambda/${analyzer}'
-      RetentionInDays: !Ref logGroupRetentionInDays
-
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${analyzer}
+      RetentionInDays:
+        Ref: logGroupRetentionInDays
+    Metadata:
+      SamResourceId: analyzerLogGroup
   analyzer:
     Type: AWS::Serverless::Function
     Properties:
-      CodeUri: lambda
+      CodeUri:
+        Bucket: awsserverlessrepo-changesets-1f9ifp952i9h0
+        Key: 824967406436/arn:aws:serverlessrepo:us-east-1:451282441545:applications-aws-lambda-power-tuning-versions-4.3.3/adc109c3-ab40-4633-b76b-13e533cc835d
       Handler: analyzer.handler
       Timeout: 10
       Policies:
-        - AWSLambdaBasicExecutionRole # only logs
-
+      - AWSLambdaBasicExecutionRole
+    Metadata:
+      SamResourceId: analyzer
   optimizerLogGroup:
     Type: AWS::Logs::LogGroup
     DependsOn: optimizer
     Properties:
-      LogGroupName: !Sub '/aws/lambda/${optimizer}'
-      RetentionInDays: !Ref logGroupRetentionInDays
-
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${optimizer}
+      RetentionInDays:
+        Ref: logGroupRetentionInDays
+    Metadata:
+      SamResourceId: optimizerLogGroup
   optimizer:
     Type: AWS::Serverless::Function
     Properties:
-      CodeUri: lambda
+      CodeUri:
+        Bucket: awsserverlessrepo-changesets-1f9ifp952i9h0
+        Key: 824967406436/arn:aws:serverlessrepo:us-east-1:451282441545:applications-aws-lambda-power-tuning-versions-4.3.3/adc109c3-ab40-4633-b76b-13e533cc835d
       Handler: optimizer.handler
       Layers:
-        - !Ref SDKlayer
+      - Ref: SDKlayer
       Policies:
-        - AWSLambdaBasicExecutionRole # only logs
-        - Version: '2012-10-17' # allow Lambda actions
-          Statement:
-            - Effect: Allow
-              Action:
-                - lambda:GetAlias
-                - lambda:PublishVersion
-                - lambda:UpdateFunctionConfiguration
-                - lambda:GetFunctionConfiguration
-                - lambda:CreateAlias
-                - lambda:UpdateAlias
-              Resource: !Ref lambdaResource
-
+      - AWSLambdaBasicExecutionRole
+      - Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Action:
+          - lambda:GetAlias
+          - lambda:PublishVersion
+          - lambda:UpdateFunctionConfiguration
+          - lambda:GetFunctionConfiguration
+          - lambda:CreateAlias
+          - lambda:UpdateAlias
+          Resource:
+            Ref: lambdaResource
+    Metadata:
+      SamResourceId: optimizer
   statemachineRole:
     Type: AWS::IAM::Role
     Properties:
-      PermissionsBoundary: !If [UsePermissionsBoundary, !Ref permissionsBoundary, !Ref AWS::NoValue]
+      PermissionsBoundary:
+        Fn::If:
+        - UsePermissionsBoundary
+        - Ref: permissionsBoundary
+        - Ref: AWS::NoValue
       ManagedPolicyArns:
-        - arn:aws:iam::aws:policy/service-role/AWSLambdaRole
+      - arn:aws:iam::aws:policy/service-role/AWSLambdaRole
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
         Statement:
-          - Effect: Allow
-            Principal:
-              Service: !Sub states.${AWS::Region}.amazonaws.com
-            Action: sts:AssumeRole
-
-  powerTuningStateMachine:
+        - Effect: Allow
+          Principal:
+            Service:
+              Fn::Sub: states.${AWS::Region}.amazonaws.com
+          Action: sts:AssumeRole
+    Metadata:
+      SamResourceId: statemachineRole
+ powerTuningStateMachine:
     Type: AWS::StepFunctions::StateMachine
     Properties:
-      RoleArn: !GetAtt statemachineRole.Arn
+      RoleArn:
+        Fn::GetAtt:
+        - statemachineRole
+        - Arn
       DefinitionString:
-        !Sub
-          - '
-            {
-              "Comment": "AWS Lambda Power Tuning state machine",
-              "StartAt": "Initializer",
-              "States": {
-                  "Initializer": {
+        Fn::Sub:
+          '{
+            "Comment": "AWS Lambda Power Tuning state machine",
+            "StartAt": "Initializer",
+            "States": {
+              "Initializer": {
+                "Type": "Map",
+                "ItemsPath": "$.LambdaFunctions",
+                "ResultPath": "$.stats",
+                "MaxConcurrency": 1, # Adjust concurrency based on your requirements
+                "Iterator": {
+                  "StartAt": "Executor",
+                  "States": {
+                    "Executor": {
                       "Type": "Task",
-                      "Resource": "${initializerArn}",
-                      "Next": "Branching",
-                      "ResultPath": "$.powerValues",
+                      "Resource": "${executorArn}",
+                      "End": true,
                       "TimeoutSeconds": ${totalExecutionTimeout},
-                      "Catch": [{
-                        "ErrorEquals": [ "States.ALL" ],
-                        "Next": "CleanUpOnError",
-                        "ResultPath": "$.error"
-                      }]
-                  },
-                  "Branching": {
-                      "Type": "Map",
-                      "Next": "Cleaner",
-                      "ItemsPath": "$.powerValues",
-                      "ResultPath": "$.stats",
-                      "ItemSelector": {
-                        "input.$": "$",
-                        "value.$": "$$.Map.Item.Value"
-                      },
-                      "MaxConcurrency": 0,
-                      "Catch": [{
+                      "Retry": [{
                         "ErrorEquals": ["States.ALL"],
-                        "Next": "CleanUpOnError",
-                        "ResultPath": "$.error"
-                      }],
-                      "Iterator": {
-                          "StartAt": "Executor",
-                          "States": {
-                              "Executor": {
-                                  "Type": "Task",
-                                  "Resource": "${executorArn}",
-                                  "End": true,
-                                  "TimeoutSeconds": ${totalExecutionTimeout},
-                                  "Retry": [{
-                                      "ErrorEquals": ["States.ALL"],
-                                      "IntervalSeconds": 3,
-                                      "MaxAttempts": 2
-                                  }]
-                              }
-                          }
-                      }
-                  },
-                  "Cleaner": {
-                      "Type": "Task",
-                      "Next": "Analyzer",
-                      "ResultPath": null,
-                      "TimeoutSeconds": ${totalExecutionTimeout},
-                      "Resource": "${cleanerArn}"
-                  },
-                  "Analyzer": {
-                      "Type": "Task",
-                      "Resource": "${analyzerArn}",
-                      "ResultPath": "$.analysis",
-                      "TimeoutSeconds": 10,
-                      "Next": "Optimizer"
-                  },
-                  "Optimizer": {
-                      "Type": "Task",
-                      "Resource": "${optimizerArn}",
-                      "ResultPath": null,
-                      "OutputPath": "$.analysis",
-                      "TimeoutSeconds": ${totalExecutionTimeout},
-                      "End": true
-                  },
-                  "CleanUpOnError": {
-                      "Type": "Task",
-                      "ResultPath": null,
-                      "OutputPath": null,
-                      "Resource": "${cleanerArn}",
-                      "TimeoutSeconds": ${totalExecutionTimeout},
-                      "End": true
+                        "IntervalSeconds": 3,
+                        "MaxAttempts": 2
+                      }]
+                    }
                   }
+                }
               }
+            }
           }'
-          - initializerArn: !GetAtt initializer.Arn
-            executorArn: !GetAtt executor.Arn
-            cleanerArn: !GetAtt cleaner.Arn
-            analyzerArn: !GetAtt analyzer.Arn
-            optimizerArn: !GetAtt optimizer.Arn
-            totalExecutionTimeout: !Ref totalExecutionTimeout
+        - executorArn:
+            Fn::GetAtt:
+              - executor
+              - Arn
+          LambdaFunctions:
+            Ref: LambdaFunctions
+          totalExecutionTimeout:
+            Ref: totalExecutionTimeout
+      Metadata:
+        SamResourceId: powerTuningStateMachine
 
 Outputs:
   StateMachineARN:
-    Value: !Ref powerTuningStateMachine
+    Value:
+      Ref: powerTuningStateMachine
